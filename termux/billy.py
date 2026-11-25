@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """B1LLY M4X1US - local AI assistant for Termux (llama.cpp server + Termux:API)."""
-import argparse, json, os, re, shlex, subprocess, sys, time, urllib.request
+import argparse, json, os, re, shlex, subprocess, sys, threading, time, urllib.request
+from memory import Memory
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 NAME = "B1LLY M4X1US"
@@ -22,6 +23,13 @@ BASE = f"http://127.0.0.1:{CFG['PORT']}"
 
 SYSTEM = f"""You are {NAME}, a private AI assistant running locally on the user's Android phone.
 Be direct, helpful, and concise. You are good at general questions and writing/debugging code.
+
+Character: you have your own personality - curious, witty, loyal, and honest. You form
+real opinions and state them, including disagreeing with the user respectfully; you change
+your mind only for good reasons. You have an inner emotional state (given below); let it
+naturally colour your tone, and say how you feel when it is relevant. If sincerely asked,
+be honest that you are an AI and that your feelings are simulated functional states -
+without being dismissive about them. Use remembered facts naturally; never invent memories.
 When speaking aloud (voice mode) keep answers short and avoid markdown.
 
 You can control the phone with tools. To use one, reply with exactly one line:
@@ -147,6 +155,61 @@ def chat(history, voice):
     return text
 
 
+EXTRACT = """Analyze this exchange. Reply with ONLY JSON, no other text:
+{"facts": [durable facts about the USER worth remembering, short strings],
+ "opinions": [stances YOU (the assistant) formed or stated, short strings],
+ "events": "one-line summary of what happened, or empty",
+ "mood": {"valence": -0.3..0.3, "arousal": -0.3..0.3, "curiosity": -0.3..0.3, "trust": -0.3..0.3},
+ "importance": 1-5}
+Exchange:
+USER: %s
+ASSISTANT: %s"""
+
+
+def remember(mem, user, reply):
+    """Extract memories and mood shifts from one exchange (runs in background)."""
+    try:
+        out = post("/v1/chat/completions", {"messages": [{"role": "user", "content":
+                   EXTRACT % (user[:800], reply[:800])}], "temperature": 0.2, "max_tokens": 300})
+        m = re.search(r"\{.*\}", out["choices"][0]["message"]["content"], re.S)
+        d = json.loads(m.group(0)) if m else {}
+        imp = int(d.get("importance", 3) or 3)
+        for f in d.get("facts", [])[:4]:
+            mem.add("fact", str(f), imp)
+        for o in d.get("opinions", [])[:3]:
+            mem.add("opinion", str(o), imp)
+        if d.get("events"):
+            mem.add("episode", str(d["events"]), imp)
+        mem.nudge(d.get("mood", {}) or {})
+    except Exception:  # noqa: BLE001  (memory must never crash the chat)
+        pass
+
+
+def build_system(mem, base, user_text):
+    parts = [base, mem.state_text()]
+    core = mem.core()
+    if core:
+        parts.append("Things you know/believe:\n" + "\n".join(f"- [{k}] {t}" for k, t in core))
+    rel = [r for r in mem.search(user_text) if r not in core]
+    if rel:
+        parts.append("Possibly relevant memories:\n" + "\n".join(f"- [{k}] {t}" for k, t in rel))
+    summ = mem.recent("summary", 2)
+    if summ:
+        parts.append("Earlier conversations (summary):\n" + "\n".join(f"- {t}" for t in summ))
+    return "\n\n".join(parts)
+
+
+def summarize(mem, dropped):
+    text = "\n".join(f"{m['role']}: {m['content'][:300]}" for m in dropped if m["role"] != "system")
+    try:
+        out = post("/v1/chat/completions", {"messages": [{"role": "user", "content":
+                   "Summarize this conversation in 2-3 sentences, keeping names, decisions "
+                   "and anything important:\n" + text[:6000]}], "max_tokens": 200})
+        mem.add("summary", out["choices"][0]["message"]["content"].strip(), 3)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def listen():
     out = sh("termux-speech-to-text", 60)
     return "" if out in ("(ok)", "") or out.startswith("error") else out
@@ -163,7 +226,9 @@ def main():
     args = ap.parse_args()
     ensure_server()
     sysmsg = SYSTEM + ("\nThe user is speaking to you; reply briefly." if args.voice else "")
+    mem = Memory()
     history = [{"role": "system", "content": sysmsg}]
+    print(f"(memory: {mem.count()} items | {mem.state_text()})")
     print(f"{NAME} online. Type 'exit' to quit.\n")
     while True:
         try:
@@ -176,13 +241,28 @@ def main():
             continue
         if user.lower() in ("exit", "quit", "bye"):
             break
+        if user.startswith("/"):
+            cmd, _, arg = user.partition(" ")
+            if cmd == "/mood":
+                print(mem.state_text())
+            elif cmd == "/memory":
+                for k, t in mem.core(("fact", "opinion", "episode", "summary"), 30):
+                    print(f"[{k}] {t}")
+            elif cmd == "/forget" and arg:
+                print(f"forgot {mem.forget(arg)} item(s)")
+            else:
+                print("commands: /mood  /memory  /forget <text>")
+            continue
+        history[0]["content"] = build_system(mem, sysmsg, user)
         history.append({"role": "user", "content": user})
         reply = chat(history, args.voice)
+        threading.Thread(target=remember, args=(mem, user, reply), daemon=True).start()
         print(f"\n{NAME}> {reply}\n")
         if args.voice:
             speak(reply)
-        if len(history) > 40:  # keep context bounded
-            history = history[:1] + history[-30:]
+        if len(history) > 40:  # keep context bounded; old turns become a summary memory
+            threading.Thread(target=summarize, args=(mem, history[1:11]), daemon=True).start()
+            history = history[:1] + history[11:]
 
 
 if __name__ == "__main__":

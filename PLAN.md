@@ -19,6 +19,17 @@ No cloud. Chat, code help, voice, and control of your phone.
 
 Models (pick in `termux/config.env`): ~4B for speed, ~8B for quality.
 
+## Phase 1.5 — Mind (done in the Termux edition)
+- **Long memory:** SQLite + full-text search in `~/.billy/billy.db`. After each turn B1LLY
+  extracts facts about you, its own opinions, and episode summaries; old chat is
+  summarized into memory, so it remembers across days with no context-window limit.
+- **Inner state:** persistent mood (valence, energy, curiosity, trust) that shifts with
+  conversation and drifts back to baseline over hours. It is injected into the prompt so
+  tone follows it. These are simulated states, and the AI is told to be honest about that.
+- **Opinions:** stored as memories and retrieved, so views stay consistent over time.
+- **You stay in control:** `/mood`, `/memory`, `/forget <text>`.
+- Next: embedding-based recall, memory consolidation ("sleep" pass), forgetting by age.
+
 ## Phase 2 — Wider reach
 - ADB over wireless debugging from Termux (`adb connect localhost`) for taps,
   swipes, typing, screenshots, and launching any app.
@@ -34,7 +45,8 @@ Models (pick in `termux/config.env`): ~4B for speed, ~8B for quality.
 ## Phase 4 — Speed and smarts
 - Hexagon NPU backend (QNN/Genie) for faster, cooler inference.
 - Local document Q&A (embeddings + sqlite-vec).
-- Optional vision model; LoRA fine-tune on your own data.
+- Optional vision model.
+- **Own model:** LoRA fine-tune for B1LLY's character - see `docs/TRAINING.md`.
 
 ## Phase 5 — PC companion
 - Same core in a Tauri/desktop app; phone can borrow the PC's GPU on your Wi-Fi.

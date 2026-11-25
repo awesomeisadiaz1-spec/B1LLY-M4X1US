@@ -15,6 +15,8 @@ See [PLAN.md](PLAN.md) for the roadmap.
    cd B1LLY-M4X1US/termux
    bash install.sh
    ```
+   If `git clone` asks for a password, the repo is private: use a GitHub personal
+   access token (fine-tuned to this repo, read-only) as the password, not your account password.
 3. Chat: `python billy.py`   Voice: `python billy.py --voice`
 
 Edit `termux/config.env` to change the model or context size.
@@ -22,3 +24,7 @@ Edit `termux/config.env` to change the model or context size.
 ## Safety
 B1LLY runs read-only actions (battery, location, ...) on its own. Sending SMS,
 placing calls, and running shell commands always show a prompt and need a `y`.
+
+## Memory and mood
+Chat commands: `/mood` (inner state), `/memory` (what B1LLY remembers), `/forget <text>`.
+Everything is stored locally in `~/.billy/billy.db`. See `docs/TRAINING.md` for making a custom model.
