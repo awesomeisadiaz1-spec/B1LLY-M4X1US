@@ -34,7 +34,20 @@ Models (pick in `termux/config.env`): ~4B for speed, ~8B for quality.
 - `termux/app.py` + `termux/web/`: installable chat app (PWA) with streaming replies,
   voice input/output, mood and memory panels, and confirm dialogs for risky actions.
 
-## Phase 2 — Wider reach
+## Phase 2/3 — Native app: stickman body (first version built)
+- `android/`: Kotlin app, no extra libraries. Built by GitHub Actions into a rolling
+  release (`billy-latest`) so you can download and install the APK.
+- **Avatar:** blue stickman overlay on top of every app. Walks, hops, waves, dances, sits,
+  sleeps, listens, thinks, talks; face follows B1LLY's mood. Hops onto edges of things
+  on screen (via accessibility). Drag him; tap to chat; tap while he works to stop him.
+- **Eyes:** accessibility service reads the on-screen element tree; notification listener
+  reads notifications. **Hands:** tap, long-press, type, swipe, scroll, back/home/recents,
+  open any app. The brain (Termux `app.py`) plans, the app executes (`device` tools).
+- **Autonomy:** default **full**. Settings dial: full / ask for risky / ask always.
+  Always on: activity log, notification Stop button, tap-to-stop.
+- Next: vision (screenshot + VLM), wake word, offline voice, standalone brain, NPU.
+
+## Phase 2 (old notes) — Wider reach
 - ADB over wireless debugging from Termux (`adb connect localhost`) for taps,
   swipes, typing, screenshots, and launching any app.
 - Wake word / hands-free loop.

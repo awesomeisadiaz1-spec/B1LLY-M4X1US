@@ -4,3 +4,8 @@ llama.cpp/
 __pycache__/
 .history
 *.db
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.apk

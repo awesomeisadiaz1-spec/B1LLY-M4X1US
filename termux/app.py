@@ -15,13 +15,40 @@ MEM = Memory()
 HISTORY = []
 CHAT_LOCK = threading.Lock()
 PENDING = {}
+DEVICE = {}
 TL = threading.local()
+DEVICE_TOOLS = {"screen_read", "tap", "long_press", "type", "swipe", "scroll", "back", "home",
+                "recents", "open_app", "list_apps", "wait", "avatar", "read_notifications",
+                "notifications_panel", "quick_settings"}
+MAX_ROUNDS_DEVICE = 25
+DEVICE_PROMPT = """
+You are also embodied on the user's Android phone as a blue stickman avatar, and you can SEE and
+USE the phone. You may read anything on it to help the user. Device tools (same ACTION format):
+- screen_read {}                          list what is on screen, each element has an id and position
+- tap {"id": N} or {"x":..,"y":..}        tap an element (prefer id)
+- long_press {"id": N}
+- type {"text": "...", "replace": false}  type into the focused text field (tap the field first)
+- swipe {"x1","y1","x2","y2"}             swipe gesture
+- scroll {"dir": "down"|"up"}             scroll the current screen
+- back {} / home {} / recents {} / notifications_panel {} / quick_settings {}
+- open_app {"name": "Chrome"}             launch an app by name or package
+- list_apps {}                            launchable apps
+- read_notifications {}                   recent notifications
+- wait {"ms": 1000}                       let the screen settle
+- avatar {"action": "wave"|"hop"|"dance"|"sleep"|"sit"}   move your stickman body, for fun
+Method: screen_read first, act with ONE tool per message, then screen_read again to check it
+worked. Keep going until the task is done, then tell the user briefly what you did. Do not
+repeat the same failing action more than twice; try another approach or explain what is blocking.
+"""
+
 TYPES = {".html": "text/html", ".js": "text/javascript", ".css": "text/css",
          ".png": "image/png", ".webmanifest": "application/manifest+json",
          ".svg": "image/svg+xml"}
 
 
 def web_confirm(msg):
+    if getattr(TL, "autonomy", "ask") == "full":
+        return True
     cid = uuid.uuid4().hex
     ev, box = threading.Event(), {"ok": False}
     PENDING[cid] = (ev, box)
@@ -55,45 +82,87 @@ def llm_stream(messages):
                 yield tok
 
 
+def parse_action(text):
+    i = text.find("ACTION:")
+    if i < 0:
+        return None
+    j = text.find("{", i)
+    if j < 0:
+        return None
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(text[j:])
+        return obj if isinstance(obj, dict) else None
+    except ValueError:
+        return None
+
+
+def device_call(tool, args, emit):
+    if not getattr(TL, "device", False):
+        return "error: the phone app is not connected, so device tools are unavailable"
+    cid = uuid.uuid4().hex
+    ev, box = threading.Event(), {"r": "error: timed out waiting for the phone"}
+    DEVICE[cid] = (ev, box)
+    emit({"t": "device", "id": cid, "tool": tool, "args": args})
+    ev.wait(90)
+    DEVICE.pop(cid, None)
+    return box["r"]
+
+
+def shrink_old_screens():
+    for m in HISTORY:
+        c = m["content"]
+        if c.startswith("TOOL_RESULT(screen_read)") and len(c) > 60:
+            m["content"] = "TOOL_RESULT(screen_read): [older screen removed]"
+
+
 def turn(user, voice, emit):
-    sysmsg = billy.SYSTEM + ("\nThe user is speaking to you; reply briefly." if voice else "")
+    dev = getattr(TL, "device", False)
+    sysmsg = billy.SYSTEM + (DEVICE_PROMPT if dev else "") + \
+        ("\nThe user is speaking to you; reply briefly." if voice else "")
     ctx = billy.build_system(MEM, "", user).strip()
     HISTORY.append({"role": "user", "content": user})
     uidx = len(HISTORY) - 1
     reply = ""
-    for _ in range(4):
+    for _ in range(MAX_ROUNDS_DEVICE if dev else 4):
         aug = dict(HISTORY[uidx], content=f"[Context for you, not from the user]\n{ctx}\n\n[User]\n{user}")
         send = [{"role": "system", "content": sysmsg}] + HISTORY[:uidx] + [aug] + HISTORY[uidx + 1:]
-        buf, streaming = "", None
+        buf, sent = "", 0
         for tok in llm_stream(send):
             buf += tok
-            if streaming is None and len(buf.lstrip()) >= 7:
-                streaming = not buf.lstrip().startswith("ACTION")
-                if streaming:
-                    emit({"t": "token", "v": buf})
-            elif streaming:
-                emit({"t": "token", "v": tok})
-        if streaming is None:
-            streaming = True
-            emit({"t": "token", "v": buf})
-        HISTORY.append({"role": "assistant", "content": buf.strip()})
-        m = billy.ACTION_RE.search(buf)
-        if streaming or not m:
+            i = buf.find("ACTION:")
+            safe = i if i >= 0 else max(0, len(buf) - 6)  # hold back a possible partial "ACTION:"
+            if safe > sent:
+                emit({"t": "token", "v": buf[sent:safe]})
+                sent = safe
+        call = parse_action(buf)
+        if call is None:
+            if len(buf) > sent:
+                emit({"t": "token", "v": buf[sent:]})
+            HISTORY.append({"role": "assistant", "content": buf.strip()})
             reply = buf.strip()
             break
+        HISTORY.append({"role": "assistant", "content": buf.strip()})
+        tool, args = str(call.get("tool", "")), call.get("args", {}) or {}
+        emit({"t": "tool", "v": f"{tool} {json.dumps(args)[:80]}"})
         try:
-            call = json.loads(m.group(1))
-            emit({"t": "tool", "v": f"{call.get('tool')} {json.dumps(call.get('args', {}))[:80]}"})
-            res = billy.tool_run(call.get("tool", ""), call.get("args", {}) or {})
+            if tool in DEVICE_TOOLS:
+                res = device_call(tool, args, emit)
+            else:
+                res = billy.tool_run(tool, args)
         except Exception as e:  # noqa: BLE001
             res = f"error: {e}"
         emit({"t": "tool_result", "v": str(res)[:200]})
-        HISTORY.append({"role": "user", "content": f"TOOL_RESULT: {res}"})
+        if tool == "screen_read":
+            shrink_old_screens()
+        HISTORY.append({"role": "user", "content": f"TOOL_RESULT({tool}): {str(res)[:3500]}"})
+        reply = buf.strip()
+    else:
+        emit({"t": "token", "v": "\n(I hit my step limit for this task.)"})
     emit({"t": "done"})
     threading.Thread(target=billy.remember, args=(MEM, user, reply), daemon=True).start()
-    if len(HISTORY) > 40:
-        dropped = HISTORY[:10]
-        del HISTORY[:10]
+    if len(HISTORY) > 60:
+        dropped = HISTORY[:20]
+        del HISTORY[:20]
         threading.Thread(target=billy.summarize, args=(MEM, dropped), daemon=True).start()
 
 
@@ -147,6 +216,12 @@ class H(BaseHTTPRequestHandler):
                 p[1]["ok"] = bool(body.get("ok"))
                 p[0].set()
             return self._json({"ok": True})
+        if path == "/api/device_result":
+            p = DEVICE.get(body.get("id"))
+            if p:
+                p[1]["r"] = str(body.get("result", ""))
+                p[0].set()
+            return self._json({"ok": True})
         if path == "/api/forget":
             return self._json({"forgot": MEM.forget(body.get("text", ""))})
         if path == "/api/reset":
@@ -166,6 +241,8 @@ class H(BaseHTTPRequestHandler):
                     pass
 
             TL.emit = emit
+            TL.device = bool(body.get("device"))
+            TL.autonomy = str(body.get("autonomy", "ask"))
             with CHAT_LOCK:
                 try:
                     turn(str(body.get("message", ""))[:4000], bool(body.get("voice")), emit)

@@ -34,3 +34,11 @@ placing calls, and running shell commands always show a prompt and need a `y`.
 ## Memory and mood
 Chat commands: `/mood` (inner state), `/memory` (what B1LLY remembers), `/forget <text>`.
 Everything is stored locally in `~/.billy/billy.db`. See `docs/TRAINING.md` for making a custom model.
+
+## The stickman app (Android)
+1. Download `B1LLY-M4X1US.apk` from this repo's **Releases** page (`billy-latest`) and install it.
+2. Open it and work down the checklist: draw over apps, Accessibility, notification access,
+   microphone. (If Accessibility is greyed out: App info → ⋮ → *Allow restricted settings*.)
+3. In Termux run `bash start.sh` and leave it running - that is B1LLY's brain.
+4. Tap **Start B1LLY**. A blue stickman appears on top of your apps. Tap him to talk.
+Build it yourself: `cd android && ./gradlew assembleDebug`.
