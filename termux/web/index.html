@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f17">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<title>B1LLY M4X1US</title>
+<style>
+:root{--bg:#0b0f17;--panel:#121826;--line:#1e2738;--text:#e6edf7;--dim:#8a97ad;--accent:#37d0ff;--me:#1c2a44;--ok:#3ddc97;--bad:#ff6b6b}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:16px/1.45 system-ui,sans-serif;display:flex;flex-direction:column;
+padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+header{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+.dot{width:12px;height:12px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent)}
+h1{font-size:16px;margin:0;letter-spacing:.08em;flex:1}
+#mood{font-size:13px;color:var(--dim);background:var(--bg);border:1px solid var(--line);padding:3px 10px;border-radius:999px;cursor:pointer}
+button{font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 12px;cursor:pointer}
+button:active{background:var(--line)}
+#log{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;scroll-behavior:smooth}
+.msg{max-width:88%;padding:10px 14px;border-radius:16px;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}
+.me{align-self:flex-end;background:var(--me);border-bottom-right-radius:4px}
+.ai{align-self:flex-start;background:var(--panel);border:1px solid var(--line);border-bottom-left-radius:4px}
+.tool{align-self:flex-start;font-size:13px;color:var(--dim);font-family:monospace}
+.err{color:var(--bad)}
+pre{background:#070a10;border:1px solid var(--line);border-radius:10px;padding:10px;overflow-x:auto;margin:8px 0;white-space:pre}
+code{font-family:ui-monospace,monospace;font-size:14px}
+.hint{color:var(--dim);text-align:center;margin:auto;padding:24px}
+form{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line);background:var(--panel);align-items:flex-end}
+textarea{flex:1;resize:none;max-height:140px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:14px;padding:10px 14px;font:inherit}
+textarea:focus{outline:1px solid var(--accent)}
+#mic.on{background:var(--bad);border-color:var(--bad)}
+#send{background:var(--accent);color:#04202b;border-color:var(--accent);font-weight:700}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:16px;max-width:92vw;width:460px;padding:16px}
+dialog::backdrop{background:#000a}
+.row{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+.mem{font-size:14px;padding:6px 0;border-bottom:1px solid var(--line)}.mem b{color:var(--accent);font-weight:600}
+label{display:flex;gap:8px;align-items:center;color:var(--dim);font-size:14px;margin:8px 0}
+.bar{height:6px;background:var(--bg);border-radius:3px;overflow:hidden;margin:2px 0 8px}.bar i{display:block;height:100%;background:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <div class="dot"></div><h1>B1LLY M4X1US</h1>
+  <span id="mood" title="Inner state">…</span>
+  <button id="menu" aria-label="Menu">☰</button>
+</header>
+<div id="log"><div class="hint">Say something to B1LLY.<br>Everything stays on your phone.</div></div>
+<form id="f">
+  <button type="button" id="mic" aria-label="Speak">🎤</button>
+  <textarea id="in" rows="1" placeholder="Message B1LLY…" enterkeyhint="send"></textarea>
+  <button id="send" type="submit">Send</button>
+</form>
+
+<dialog id="menuD">
+  <h3 style="margin-top:0">B1LLY</h3>
+  <div id="stateBox"></div>
+  <label><input type="checkbox" id="tts"> Speak replies aloud</label>
+  <div class="row" style="justify-content:flex-start;flex-wrap:wrap">
+    <button id="memBtn">Memory</button><button id="newBtn">New chat</button>
+    <button id="closeMenu" style="margin-left:auto">Close</button>
+  </div>
+</dialog>
+<dialog id="memD"><h3 style="margin-top:0">What I remember</h3><div id="memList"></div>
+  <div class="row"><button id="closeMem">Close</button></div></dialog>
+<dialog id="confD"><div id="confMsg"></div>
+  <div class="row"><button id="confNo">Deny</button><button id="confYes" style="background:var(--ok);color:#04200f">Allow</button></div></dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const log = $('#log'), input = $('#in');
+let busy = false, speaking = false;
+const store = { get(k){try{return localStorage.getItem(k)}catch(e){return null}}, set(k,v){try{localStorage.setItem(k,v)}catch(e){}} };
+$('#tts').checked = store.get('tts') === '1';
+$('#tts').onchange = e => store.set('tts', e.target.checked ? '1' : '0');
+
+function esc(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+function render(el, text){
+  const parts = text.split('```');
+  el.innerHTML = parts.map((p,i)=> i%2 ? '<pre><code>'+esc(p.replace(/^[\w+-]*\n/,''))+'</code></pre>' : esc(p)).join('');
+}
+function add(cls, text){
+  const h = log.querySelector('.hint'); if (h) h.remove();
+  const d = document.createElement('div'); d.className = 'msg ' + cls; render(d, text); log.appendChild(d);
+  log.scrollTop = log.scrollHeight; return d;
+}
+function note(text, cls=''){
+  const d = document.createElement('div'); d.className = 'tool ' + cls; d.textContent = text; log.appendChild(d); log.scrollTop = log.scrollHeight;
+}
+async function api(path, body){
+  const r = await fetch(path, body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : {});
+  return r.json();
+}
+async function refresh(){
+  try{
+    const s = await api('/api/state');
+    $('#mood').textContent = s.mood;
+    const v = s.values;
+    $('#stateBox').innerHTML = `<div style="color:var(--dim);font-size:14px;margin-bottom:8px">Feeling <b style="color:var(--text)">${s.mood}</b> · ${s.memories} memories</div>` +
+      ['valence','arousal','curiosity','trust'].map(k=>{const p=k==='valence'?(v[k]+1)*50:v[k]*100;
+      return `<div style="font-size:13px;color:var(--dim)">${k}</div><div class="bar"><i style="width:${Math.max(0,Math.min(100,p))}%"></i></div>`}).join('');
+  }catch(e){ $('#mood').textContent = 'offline'; }
+}
+function speak(text){
+  if (!$('#tts').checked || !('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text.replace(/```[\s\S]*?```/g,' code omitted ').replace(/[*_`#>]/g,''));
+  speechSynthesis.speak(u);
+}
+function confirmDialog(msg){
+  return new Promise(res=>{ $('#confMsg').textContent = msg + ' — allow?'; const d=$('#confD');
+    $('#confYes').onclick=()=>{d.close();res(true)}; $('#confNo').onclick=()=>{d.close();res(false)}; d.oncancel=()=>res(false); d.showModal(); });
+}
+async function send(text, voice){
+  if (busy || !text.trim()) return; busy = true; $('#send').disabled = true;
+  speechSynthesis && speechSynthesis.cancel();
+  add('me', text); input.value = ''; input.style.height = 'auto';
+  let el = null, full = '';
+  try{
+    const r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:text, voice})});
+    const rd = r.body.getReader(), dec = new TextDecoder(); let buf = '';
+    for(;;){
+      const {value, done} = await rd.read(); if (done) break;
+      buf += dec.decode(value, {stream:true});
+      let i; while((i = buf.indexOf('\n\n')) >= 0){
+        const line = buf.slice(0,i); buf = buf.slice(i+2);
+        if (!line.startsWith('data: ')) continue;
+        const ev = JSON.parse(line.slice(6));
+        if (ev.t === 'token'){ full += ev.v; if(!el) el = add('ai',''); render(el, full); log.scrollTop = log.scrollHeight; }
+        else if (ev.t === 'tool'){ note('⚙ ' + ev.v); el = null; full = ''; }
+        else if (ev.t === 'tool_result'){ note('↳ ' + ev.v); }
+        else if (ev.t === 'confirm'){ api('/api/confirm', {id:ev.id, ok: await confirmDialog(ev.msg)}); }
+        else if (ev.t === 'error'){ note('Error: ' + ev.v, 'err'); }
+      }
+    }
+  }catch(e){ note('Connection problem: ' + e.message, 'err'); }
+  busy = false; $('#send').disabled = false;
+  if (full) speak(full);
+  setTimeout(refresh, 4000); refresh();
+}
+$('#f').onsubmit = e => { e.preventDefault(); send(input.value, false); };
+input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && matchMedia('(hover:hover)').matches){ e.preventDefault(); $('#f').requestSubmit(); }});
+input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 140) + 'px'; });
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition; let rec = null;
+$('#mic').onclick = () => {
+  if (!SR){ note('Voice input is not supported in this browser. Use Chrome.', 'err'); return; }
+  if (rec){ rec.stop(); return; }
+  speechSynthesis && speechSynthesis.cancel();
+  rec = new SR(); rec.lang = navigator.language || 'en-US'; rec.interimResults = true;
+  $('#mic').classList.add('on');
+  rec.onresult = e => { input.value = [...e.results].map(r => r[0].transcript).join(''); };
+  rec.onerror = e => note('Mic error: ' + e.error, 'err');
+  rec.onend = () => { $('#mic').classList.remove('on'); const t = input.value; rec = null; if (t.trim()){ $('#tts').checked = true; send(t, true); } };
+  rec.start();
+};
+$('#menu').onclick = () => { refresh(); $('#menuD').showModal(); };
+$('#mood').onclick = () => $('#menu').click();
+$('#closeMenu').onclick = () => $('#menuD').close();
+$('#newBtn').onclick = async () => { await api('/api/reset', {}); log.innerHTML = '<div class="hint">New chat. I still remember you.</div>'; $('#menuD').close(); };
+$('#memBtn').onclick = async () => {
+  const m = await api('/api/memory');
+  $('#memList').innerHTML = m.length ? m.map(x => `<div class="mem"><b>${x.kind}</b> ${esc(x.text)}</div>`).join('') : '<div class="hint">Nothing yet.</div>';
+  $('#menuD').close(); $('#memD').showModal();
+};
+$('#closeMem').onclick = () => $('#memD').close();
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
+refresh();
+</script>
+</body>
+</html>

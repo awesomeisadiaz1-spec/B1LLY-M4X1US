@@ -19,6 +19,12 @@ See [PLAN.md](PLAN.md) for the roadmap.
    access token (fine-tuned to this repo, read-only) as the password, not your account password.
 3. Chat: `python billy.py`   Voice: `python billy.py --voice`
 
+## App mode (recommended)
+`bash start.sh` starts B1LLY and opens the chat app in Chrome. In Chrome tap the menu
+(⋮) → **Add to Home screen** / **Install app** to get a B1LLY icon. For one-tap launch from
+the home screen, install **Termux:Widget** (F-Droid) and run `bash make-shortcut.sh`.
+`bash stop.sh` shuts everything down and frees RAM.
+
 Edit `termux/config.env` to change the model or context size.
 
 ## Safety

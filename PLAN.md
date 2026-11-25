@@ -30,6 +30,10 @@ Models (pick in `termux/config.env`): ~4B for speed, ~8B for quality.
 - **You stay in control:** `/mood`, `/memory`, `/forget <text>`.
 - Next: embedding-based recall, memory consolidation ("sleep" pass), forgetting by age.
 
+## Phase 1.7 — Home-screen app (done)
+- `termux/app.py` + `termux/web/`: installable chat app (PWA) with streaming replies,
+  voice input/output, mood and memory panels, and confirm dialogs for risky actions.
+
 ## Phase 2 — Wider reach
 - ADB over wireless debugging from Termux (`adb connect localhost`) for taps,
   swipes, typing, screenshots, and launching any app.
