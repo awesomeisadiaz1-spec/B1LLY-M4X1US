@@ -1,0 +1,5 @@
+*.gguf
+models/
+llama.cpp/
+__pycache__/
+.history
